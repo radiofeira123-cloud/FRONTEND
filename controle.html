@@ -4,7 +4,7 @@
 <button id="finalize">Finalizar Sessão</button>
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script>
-const socket = io("https://render-9ea7.onrender.com");
+const socket = io("https://chatcabinerender.onrender.com");
 document.getElementById('finalize').addEventListener('click', ()=>{
   socket.emit('finalize_session', { session: true });
   alert('Finalize command sent');
