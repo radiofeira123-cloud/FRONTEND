@@ -16,7 +16,7 @@
             
             // Teste 1: Health Check
             try {
-                const response = await fetch('https://render-9ea7.onrender.com/health');
+                const response = await fetch('https://chatcabinerender-2.onrender.com/health');
                 const data = await response.json();
                 resultado.innerHTML += `✅ Health Check: ${data.message}<br>`;
             } catch (error) {
