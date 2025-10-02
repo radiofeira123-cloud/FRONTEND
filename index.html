@@ -1,125 +1,255 @@
 <!doctype html>
-<html>
+<html lang="pt-BR">
 <head>
-    <title>PC - Cabine Fotográfica</title>
-    <style>
-        body { font-family: Arial; padding: 20px; }
-        #debug { background: #000; color: #0f0; padding: 10px; margin: 10px 0; font-family: monospace; font-size: 12px; max-height: 300px; overflow-y: auto; }
-        img { max-width: 200px; margin: 5px; border: 2px solid #0f0; }
-        .status-connected { color: #0f0; }
-        .status-disconnected { color: #f00; }
-        button { padding: 10px; margin: 5px; background: #333; color: white; border: 1px solid #666; }
-    </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cabine — Operador</title>
+<style>
+  body{font-family:Arial, sans-serif;background:#111;color:#fff;margin:16px;}
+  #photosPreview{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  #photosPreview img{max-width:300px;border:3px solid #fff;border-radius:8px;}
+  button{padding:10px 14px;margin-right:8px;border-radius:8px;border:none;background:#0b84ff;color:#fff;font-weight:700;cursor:pointer;}
+  button:disabled{background:#666;cursor:not-allowed;}
+  #qrDiv a{color:#0bf;}
+  #debug{background:#222;padding:10px;border-radius:5px;margin-top:10px;font-family:monospace;font-size:12px;max-height:200px;overflow-y:auto;}
+  .status-connected{color:#4CAF50;}
+  .status-disconnected{color:#f44336;}
+</style>
 </head>
 <body>
-    <h1>📸 Cabine Fotográfica - PC</h1>
-    <div>Status: <span id="status" class="status-disconnected">Desconectado</span></div>
-    <div>Sessão: <code id="sessionId"></code></div>
+<h1>Cabine Fotográfica — Operador</h1>
+<div id="status">Status: <span id="conn" class="status-disconnected">Conectando...</span></div>
+<div>Session: <span id="sessionId"></span></div>
+<div id="controls" style="margin-top:12px"></div>
+<div id="photosPreview"></div>
+<div id="qrDiv" style="margin-top:12px"></div>
+<div id="debug"></div>
+
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script>
+(async function(){
+  const SERVER = "https://render-9ea7.onrender.com";
+  const IMGBB_KEY = "6734e028b20f88d5795128d242f85582";
+  
+  const socket = io(SERVER, { 
+    transports: ['websocket', 'polling'],
+    withCredentials: true
+  });
+  
+  const conn = document.getElementById('conn');
+  const sessionIdEl = document.getElementById('sessionId');
+  const controls = document.getElementById('controls');
+  const preview = document.getElementById('photosPreview');
+  const qrDiv = document.getElementById('qrDiv');
+  const debug = document.getElementById('debug');
+  
+  let latestPhotos = [];
+  
+  // Usar session da URL ou criar uma padrão
+  const urlParams = new URLSearchParams(window.location.search);
+  let sessionId = urlParams.get('session') || 'pc_' + Date.now();
+  
+  sessionIdEl.textContent = sessionId;
+  
+  function logDebug(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    debug.innerHTML = `[${timestamp}] ${message}<br>` + debug.innerHTML;
+    console.log('DEBUG PC:', message);
+  }
+  
+  function ensureButton(id, text){
+    let b = document.getElementById(id);
+    if(!b){ b = document.createElement('button'); b.id = id; b.textContent = text; controls.appendChild(b); }
+    return b;
+  }
+  
+  const btnGenQR = ensureButton('btnGenQR', 'Gerar QR Code (Celular)');
+  const btnStart = ensureButton('btnStart', 'Iniciar Sessão (limpar fotos)');
+  const btnGenSend = ensureButton('btnGenSend', 'Gerar Visualizador + Enviar');
+  const btnPrint = ensureButton('btnPrint', 'Imprimir');
+
+  // Entrar na sala ao conectar
+  socket.on('connect', ()=>{ 
+    conn.textContent = 'Conectado';
+    conn.className = 'status-connected';
+    logDebug('✅ PC connected to server');
     
-    <button onclick="generateQR()">🔗 Gerar QR Code</button>
-    <button onclick="clearDebug()">🗑️ Limpar Logs</button>
+    // ENTRAR NA MESMA SALA DO CELULAR
+    socket.emit('join_room', { session: sessionId });
+    logDebug(`🚪 PC joined room: ${sessionId}`);
+  });
+  
+  socket.on('disconnect', ()=>{ 
+    conn.textContent = 'Offline';
+    conn.className = 'status-disconnected';
+    logDebug('❌ PC disconnected');
+  });
+  
+  socket.on('photos_from_cell', (data)=>{ 
+    logDebug(`📸 RECEIVED photos_from_cell: ${data?.photos?.length} photos, session: ${data?.session}`);
+    console.log('PC received photos:', data);
     
-    <div id="qrDiv"></div>
-    <div id="debug"></div>
-    <div id="photos"></div>
-
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
-    <script>
-        const SERVER_URL = "https://render-9ea7.onrender.com";
-        const sessionId = 'pc_' + Date.now();
-        
-        document.getElementById('sessionId').textContent = sessionId;
-        
-        // ✅ CONFIGURAÇÃO ROBUSTA DO SOCKET
-        const socket = io(SERVER_URL, {
-            transports: ['websocket', 'polling'],
-            timeout: 10000,
-            reconnection: true,
-            reconnectionAttempts: 10,
-            reconnectionDelay: 1000
-        });
-        
-        function log(msg, type = 'info') {
-            const timestamp = new Date().toLocaleTimeString();
-            const color = type === 'error' ? '#f00' : type === 'success' ? '#0f0' : '#fff';
-            console.log(`PC [${timestamp}]:`, msg);
-            
-            const debug = document.getElementById('debug');
-            debug.innerHTML = `<span style="color: ${color}">[${timestamp}] ${msg}</span><br>` + debug.innerHTML;
-        }
-
-        // ✅ EVENTOS DO SOCKET
-        socket.on('connect', () => {
-            log('✅ CONECTADO - Socket: ' + socket.id, 'success');
-            document.getElementById('status').textContent = 'Conectado';
-            document.getElementById('status').className = 'status-connected';
-            
-            // Entrar na sala
-            socket.emit('join_room', { session: sessionId });
-            log('🚪 Entrando na sala: ' + sessionId);
-        });
-
-        socket.on('photos_from_cell', (data) => {
-            log('🎉 FOTOS RECEBIDAS! ' + data.photos.length + ' fotos', 'success');
-            log('Sessão: ' + data.session);
-            
-            // Mostrar as fotos
-            const photosDiv = document.getElementById('photos');
-            photosDiv.innerHTML = '<h3>📸 Fotos Recebidas:</h3>';
-            
-            data.photos.forEach((photo, index) => {
-                const img = document.createElement('img');
-                img.src = photo;
-                img.alt = `Foto ${index + 1}`;
-                img.title = `Foto ${index + 1}`;
-                photosDiv.appendChild(img);
-            });
-        });
-
-        socket.on('disconnect', (reason) => {
-            log('❌ DESCONECTADO - Razão: ' + reason, 'error');
-            document.getElementById('status').textContent = 'Desconectado';
-            document.getElementById('status').className = 'status-disconnected';
-        });
-
-        socket.on('connect_error', (error) => {
-            log('💥 ERRO DE CONEXÃO: ' + error.message, 'error');
-        });
-
-        socket.on('reconnect', (attempt) => {
-            log('🔁 RECONECTADO - Tentativa: ' + attempt, 'success');
-            socket.emit('join_room', { session: sessionId });
-        });
-
-        function generateQR() {
-            const url = window.location.origin + '/celular.html?session=' + sessionId;
-            log('🔗 Gerando QR Code para: ' + url);
-            
-            document.getElementById('qrDiv').innerHTML = '<h3>📱 QR Code para Celular:</h3>';
-            
-            QRCode.toCanvas(url, { width: 200, margin: 2 }, (err, canvas) => {
-                if (err) {
-                    log('❌ Erro ao gerar QR: ' + err, 'error');
-                    return;
-                }
-                document.getElementById('qrDiv').appendChild(canvas);
-                
-                const link = document.createElement('p');
-                link.innerHTML = `<a href="${url}" target="_blank">${url}</a>`;
-                document.getElementById('qrDiv').appendChild(link);
-                
-                log('✅ QR Code gerado com sucesso', 'success');
-            });
-        }
-
-        function clearDebug() {
-            document.getElementById('debug').innerHTML = '';
-        }
-
-        // Inicialização
-        log('🎮 PC inicializado - Sessão: ' + sessionId);
-        log('🔗 Conectando em: ' + SERVER_URL);
-    </script>
+    if(data && data.photos){ 
+      latestPhotos = data.photos; 
+      preview.innerHTML = '<h3>Fotos Recebidas:</h3>'; 
+      latestPhotos.forEach((p,i)=>{ 
+        const img = document.createElement('img'); 
+        img.src = p; 
+        img.title = `Foto ${i+1}`;
+        preview.appendChild(img); 
+      }); 
+      logDebug(`✅ ${latestPhotos.length} photos displayed`);
+    } 
+  });
+  
+  // Debug: ver todos os eventos do socket
+  socket.onAny((eventName, ...args) => {
+    if (eventName !== 'photos_from_cell') { // Já logamos esse separadamente
+      logDebug(`🔔 Socket event: ${eventName}`, args);
+    }
+  });
+  
+  btnStart.addEventListener('click', ()=>{ 
+    latestPhotos = []; 
+    preview.innerHTML = ''; 
+    qrDiv.innerHTML = ''; 
+    socket.emit('finalize_session', { session: sessionId }); 
+    logDebug('🔄 Session finalized - cleaning photos');
+  });
+  
+  btnGenQR.addEventListener('click', ()=>{ 
+    const url = window.location.origin + '/celular.html?session=' + sessionId; 
+    qrDiv.innerHTML = '<h3>QR Code para Celular:</h3>'; 
+    QRCode.toCanvas(url, { width: 200 }, (err, canvas)=>{ 
+      if(!err) {
+        qrDiv.appendChild(canvas); 
+        logDebug('✅ QR Code generated for: ' + url);
+      } else {
+        logDebug('❌ QR Code error: ' + err);
+      }
+    }); 
+    const p = document.createElement('p'); 
+    p.innerHTML = '<a href="'+url+'" target="_blank">'+url+'</a>'; 
+    qrDiv.appendChild(p); 
+  });
+  
+  async function uploadToImgbb(dataUrl){ 
+    try{ 
+      const res = await fetch(dataUrl); 
+      const blob = await res.blob(); 
+      const fd = new FormData(); 
+      fd.append('image', blob); 
+      const r = await fetch('https://api.imgbb.com/1/upload?key=' + IMGBB_KEY, { method:'POST', body: fd }); 
+      const j = await r.json(); 
+      if(j && j.success) return j.data.url; 
+      return null; 
+    }catch(e){ 
+      console.error('upload err', e); 
+      return null; 
+    } 
+  }
+  
+  async function createInstagramMontage(){ 
+    if(latestPhotos.length<1){ 
+      alert('Nenhuma foto'); 
+      return null; 
+    } 
+    const overlay = new Image(); 
+    overlay.crossOrigin = "anonymous";
+    overlay.src = 'caralho.png'; 
+    await new Promise(r=>overlay.onload=r); 
+    const cw = overlay.naturalWidth || 1200; 
+    const ch = overlay.naturalHeight || Math.round(cw*9/16); 
+    const canvas = document.createElement('canvas'); 
+    canvas.width = cw; 
+    canvas.height = ch; 
+    const ctx = canvas.getContext('2d'); 
+    ctx.fillStyle = '#000'; 
+    ctx.fillRect(0,0,cw,ch); 
+    const sliceH = Math.floor(ch/3); 
+    for(let i=0;i<3;i++){ 
+      const im = new Image(); 
+      im.crossOrigin = "anonymous";
+      im.src = latestPhotos[i] || latestPhotos[0]; 
+      await new Promise(r=>im.onload=r); 
+      ctx.drawImage(im, 0, i*sliceH, cw, sliceH); 
+    } 
+    ctx.drawImage(overlay,0,0,cw,ch); 
+    return canvas.toDataURL('image/jpeg', 0.95); 
+  }
+  
+  async function createPrintMontage(){ 
+    if(latestPhotos.length<1){ 
+      alert('Nenhuma foto'); 
+      return null; 
+    } 
+    const bg = new Image(); 
+    bg.crossOrigin = "anonymous";
+    bg.src = 'imprimir.png'; 
+    await new Promise(r=>bg.onload=r); 
+    const canvas = document.createElement('canvas'); 
+    canvas.width = 3322; 
+    canvas.height = 4798; 
+    const ctx = canvas.getContext('2d'); 
+    ctx.drawImage(bg,0,0,canvas.width,canvas.height); 
+    const coords = [
+      {x:152,y:150,w:2214,h:1428},
+      {x:150,y:1687,w:2216,h:1437},
+      {x:150,y:3235,w:2216,h:1435}
+    ]; 
+    for(let i=0;i<3;i++){ 
+      const im = new Image(); 
+      im.crossOrigin = "anonymous";
+      im.src = latestPhotos[i] || latestPhotos[0]; 
+      await new Promise(r=>im.onload=r); 
+      ctx.drawImage(im, coords[i].x, coords[i].y, coords[i].w, coords[i].h); 
+    } 
+    return canvas.toDataURL('image/jpeg',0.95); 
+  }
+  
+  btnGenSend.addEventListener('click', async ()=>{ 
+    if(latestPhotos.length<1) return alert('Nenhuma foto recebida'); 
+    btnGenSend.disabled = true; 
+    btnGenSend.textContent = 'Gerando...'; 
+    
+    logDebug('🔄 Starting montage generation and upload...');
+    
+    const insta = await createInstagramMontage(); 
+    const printm = await createPrintMontage(); 
+    const uploads = latestPhotos.map(p=>uploadToImgbb(p)); 
+    uploads.push(uploadToImgbb(insta)); 
+    uploads.push(uploadToImgbb(printm)); 
+    const results = await Promise.all(uploads); 
+    
+    qrDiv.innerHTML = ''; 
+    const instaUrl = results[latestPhotos.length] || results[0]; 
+    QRCode.toCanvas(instaUrl, { width:200 }, (err, canvas)=>{ 
+      if(!err) qrDiv.appendChild(canvas); 
+    }); 
+    const list = document.createElement('div'); 
+    list.innerHTML = '<h4>Links das Fotos:</h4>' + results.map((u, i) => u? `<div><a href="${u}" target="_blank">Foto ${i+1}</a></div>` : 'erro').join(''); 
+    qrDiv.appendChild(list); 
+    
+    btnGenSend.disabled = false; 
+    btnGenSend.textContent = 'Gerar Visualizador + Enviar'; 
+    logDebug('✅ Montage generation completed');
+  });
+  
+  btnPrint.addEventListener('click', async ()=>{ 
+    const dataUrl = await createPrintMontage(); 
+    const w = window.open('', '_blank'); 
+    w.document.write('<html><head><style>@page{size:9cm 13cm;margin:0;}body{margin:0;}img{width:100%;height:auto;display:block;}</style></head><body><img src="'+dataUrl+'"></body></html>'); 
+    w.document.close(); 
+    setTimeout(()=>{ w.focus(); w.print(); }, 600); 
+    logDebug('🖨️ Print dialog opened');
+  });
+  
+  // Inicialização
+  logDebug(`🎮 PC initialized with session: ${sessionId}`);
+  logDebug('⏳ Waiting for connection...');
+  
+})();
+</script>
 </body>
 </html>
