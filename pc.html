@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cabine — PC</title>
+<style>
+  body{font-family:Arial, sans-serif;background:#111;color:#fff;margin:16px;}
+  #photosPreview img{max-width:300px;border:3px solid #fff;margin:6px;border-radius:8px;}
+  button{padding:10px 14px;margin-right:8px;border-radius:8px;border:none;background:#0b84ff;color:#fff;font-weight:700}
+  #qrDiv a{color:#0bf;}
+</style>
+</head>
+<body>
+<h1>PC — Operador</h1>
+<div id="status">Status: <span id="conn">Conectando...</span></div>
+<div id="controls" style="margin-top:12px"></div>
+<div id="photosPreview" style="margin-top:12px"></div>
+<div id="qrDiv" style="margin-top:12px"></div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script>
+(async function(){
+  const SERVER = "https://render-9ea7.onrender.com";
+  const IMGBB_KEY = "6734e028b20f88d5795128d242f85582";
+  const socket = io(SERVER, { transports: ['websocket','polling'] });
+  const conn = document.getElementById('conn');
+  const controls = document.getElementById('controls');
+  const preview = document.getElementById('photosPreview');
+  const qrDiv = document.getElementById('qrDiv');
+  let latestPhotos = [];
+  let sessionId = 'pc_' + Date.now();
+  function ensureButton(id, text){
+    let b = document.getElementById(id);
+    if(!b){ b = document.createElement('button'); b.id = id; b.textContent = text; controls.appendChild(b); }
+    return b;
+  }
+  const btnGenQR = ensureButton('btnGenQR', 'Gerar QR Code (Celular)');
+  const btnStart = ensureButton('btnStart', 'Iniciar Sessão (limpar fotos)');
+  const btnGenSend = ensureButton('btnGenSend', 'Gerar Visualizador + Enviar');
+  const btnPrint = ensureButton('btnPrint', 'Imprimir');
+  socket.on('connect', ()=>{ conn.textContent = 'Conectado'; console.log('PC connected'); });
+  socket.on('disconnect', ()=>{ conn.textContent = 'Offline'; });
+  socket.on('photos_from_cell', (data)=>{ console.log('Photos from cell', data); if(data && data.photos){ latestPhotos = data.photos; preview.innerHTML = ''; latestPhotos.forEach((p,i)=>{ const img = document.createElement('img'); img.src = p; preview.appendChild(img); }); } });
+  btnStart.addEventListener('click', ()=>{ latestPhotos = []; preview.innerHTML = ''; qrDiv.innerHTML = ''; socket.emit('finalize_session', { session: true }); });
+  btnGenQR.addEventListener('click', ()=>{ const url = window.location.origin + '/celular.html?session=' + sessionId; qrDiv.innerHTML = ''; QRCode.toCanvas(url, { width: 200 }, (err, canvas)=>{ if(!err) qrDiv.appendChild(canvas); }); const p = document.createElement('p'); p.innerHTML = '<a href="'+url+'" target="_blank">'+url+'</a>'; qrDiv.appendChild(p); });
+  async function uploadToImgbb(dataUrl){ try{ const res = await fetch(dataUrl); const blob = await res.blob(); const fd = new FormData(); fd.append('image', blob); const r = await fetch('https://api.imgbb.com/1/upload?key=' + IMGBB_KEY, { method:'POST', body: fd }); const j = await r.json(); if(j && j.success) return j.data.url; return null; }catch(e){ console.error('upload err', e); return null; } }
+  async function createInstagramMontage(){ if(latestPhotos.length<1){ alert('Nenhuma foto'); return null; } const overlay = new Image(); overlay.src = 'caralho.png'; await new Promise(r=>overlay.onload=r); const cw = overlay.naturalWidth || 1200; const ch = overlay.naturalHeight || Math.round(cw*9/16); const canvas = document.createElement('canvas'); canvas.width = cw; canvas.height = ch; const ctx = canvas.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0,0,cw,ch); const sliceH = Math.floor(ch/3); for(let i=0;i<3;i++){ const im = new Image(); im.src = latestPhotos[i] || latestPhotos[0]; await new Promise(r=>im.onload=r); ctx.drawImage(im, 0, i*sliceH, cw, sliceH); } ctx.drawImage(overlay,0,0,cw,ch); return canvas.toDataURL('image/jpeg', 0.95); }
+  async function createPrintMontage(){ if(latestPhotos.length<1){ alert('Nenhuma foto'); return null; } const bg = new Image(); bg.src = 'imprimir.png'; await new Promise(r=>bg.onload=r); const canvas = document.createElement('canvas'); canvas.width = 3322; canvas.height = 4798; const ctx = canvas.getContext('2d'); ctx.drawImage(bg,0,0,canvas.width,canvas.height); const coords = [{x:152,y:150,w:2214,h:1428},{x:150,y:1687,w:2216,h:1437},{x:150,y:3235,w:2216,h:1435}]; for(let i=0;i<3;i++){ const im = new Image(); im.src = latestPhotos[i] || latestPhotos[0]; await new Promise(r=>im.onload=r); ctx.drawImage(im, coords[i].x, coords[i].y, coords[i].w, coords[i].h); } return canvas.toDataURL('image/jpeg',0.95); }
+  btnGenSend.addEventListener('click', async ()=>{ if(latestPhotos.length<1) return alert('Nenhuma foto recebida'); btnGenSend.disabled = true; btnGenSend.textContent = 'Gerando...'; const insta = await createInstagramMontage(); const printm = await createPrintMontage(); const uploads = latestPhotos.map(p=>uploadToImgbb(p)); uploads.push(uploadToImgbb(insta)); uploads.push(uploadToImgbb(printm)); const results = await Promise.all(uploads); qrDiv.innerHTML = ''; const instaUrl = results[latestPhotos.length] || results[0]; QRCode.toCanvas(instaUrl, { width:200 }, (err, canvas)=>{ if(!err) qrDiv.appendChild(canvas); }); const list = document.createElement('div'); list.innerHTML = '<h4>Links</h4>' + results.map(u=> u? '<a href="'+u+'" target="_blank">'+u+'</a>' : 'erro').join('<br>'); qrDiv.appendChild(list); btnGenSend.disabled = false; btnGenSend.textContent = 'Gerar Visualizador + Enviar'; });
+  btnPrint.addEventListener('click', async ()=>{ const dataUrl = await createPrintMontage(); const w = window.open('', '_blank'); w.document.write('<html><head><style>@page{size:9cm 13cm;margin:0;}body{margin:0;}img{width:100%;height:auto;display:block;}</style></head><body><img src="'+dataUrl+'"></body></html>'); w.document.close(); setTimeout(()=>{ w.focus(); w.print(); }, 600); });
+})();</script>
+</body>
+</html>

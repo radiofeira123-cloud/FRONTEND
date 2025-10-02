@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Controle</title></head><body>
+<h1>Controle</h1>
+<button id="finalize">Finalizar Sessão</button>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+const socket = io("https://render-9ea7.onrender.com");
+document.getElementById('finalize').addEventListener('click', ()=>{
+  socket.emit('finalize_session', { session: true });
+  alert('Finalize command sent');
+});
+</script>
+</body></html>

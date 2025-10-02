@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cabine — Celular</title>
+<style>
+  html,body{height:100%;margin:0;background:#000;color:#fff;font-family:Arial, sans-serif;}
+  video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1;background:#000;}
+  #countdown{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:9999;pointer-events:none;color:#fff;text-shadow:0 6px 18px rgba(0,0,0,0.8);font-weight:900;font-family:'Arial Black', Arial, sans-serif;}
+  #freezePreview{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:9998;background:rgba(0,0,0,0.85);}
+  #freezePreview img{max-width:100%;max-height:100%;display:block;margin:auto;}
+  #thankOverlay{display:none;}
+  #startScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:10000;background:linear-gradient(135deg,#00000088,#00000088);}
+  button{padding:12px 18px;font-size:18px;border-radius:8px;border:none;background:#0b84ff;color:#fff}
+</style>
+</head>
+<body>
+<video id="preview" autoplay playsinline muted></video>
+<div id="countdown" class="hidden"></div>
+<div id="freezePreview"><img id="freezeImg" src=""></div>
+<audio id="shutterAudio" src="clack.mp3" preload="auto"></audio>
+<div id="startScreen"><button id="startBtn">Clique para iniciar</button></div>
+<div id="thankOverlay" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:10001;background:rgba(0,0,0,0.7);color:#fff;font-size:32px;font-weight:700">Obrigado por usar a cabine</div>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+<script>
+(async function(){
+  const SERVER = "https://render-9ea7.onrender.com";
+  const session = 'cell_' + Date.now();
+  const socket = io(SERVER, { transports: ['websocket','polling'] });
+  const preview = document.getElementById('preview');
+  const countdownEl = document.getElementById('countdown');
+  const freezeDiv = document.getElementById('freezePreview');
+  const freezeImg = document.getElementById('freezeImg');
+  const startScreen = document.getElementById('startScreen');
+  const startBtn = document.getElementById('startBtn');
+  const thank = document.getElementById('thankOverlay');
+  const shutter = document.getElementById('shutterAudio');
+  let localStream = null;
+  let photos = [];
+  function delay(ms){ return new Promise(r=>setTimeout(r, ms)); }
+  function showCountdownText(txt, sizePx){ countdownEl.textContent = txt; countdownEl.style.fontSize = sizePx + 'px'; countdownEl.classList.remove('hidden'); }
+  function hideCountdown(){ countdownEl.classList.add('hidden'); }
+  async function startCamera(){
+    try{
+      localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode:'user' }, audio:false });
+      preview.srcObject = localStream;
+      await preview.play().catch(()=>{});
+      console.log("Camera started");
+    }catch(e){
+      console.error("Camera error", e);
+      alert("Erro ao acessar câmera: " + e.message);
+    }
+  }
+  async function countdown(seconds){
+    for(let n=seconds; n>=2; n--){
+      showCountdownText(String(n), Math.max(48, Math.floor(window.innerWidth/6)));
+      await delay(1000);
+    }
+    showCountdownText('SORRIA', Math.max(56, Math.floor(window.innerWidth/5)));
+    try{ shutter.currentTime = 0; shutter.play().catch(()=>{}); }catch(e){}
+    await delay(2000);
+    hideCountdown();
+  }
+  async function captureFrame(){
+    const w = preview.videoWidth || 1280;
+    const h = preview.videoHeight || 720;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'); ctx.drawImage(preview, 0, 0, w, h);
+    return c.toDataURL('image/jpeg', 0.95);
+  }
+  async function runSequence(){
+    photos = [];
+    startScreen.style.display = 'none';
+    for(let i=1;i<=3;i++){
+      await countdown(5);
+      const data = await captureFrame();
+      photos.push(data);
+      freezeImg.src = data;
+      freezeDiv.style.display = 'flex';
+      await delay(3000);
+      freezeDiv.style.display = 'none';
+      await delay(500);
+    }
+    socket.emit('photos_from_cell', { session, photos });
+    console.log('Photos sent to PC');
+    thank.style.display = 'flex';
+  }
+  socket.on('finalize_session', (d)=>{ if(d && d.session){ thank.style.display = 'none'; startScreen.style.display = 'flex'; photos = []; } });
+  socket.on('connect', ()=>{ socket.emit('join_room', { session }); console.log('Connected to server (cell)'); });
+  startBtn.addEventListener('click', ()=>{ runSequence().catch(e=>console.error(e)); });
+  await startCamera();
+})();
+</script>
+</body>
+</html>
