@@ -6,17 +6,22 @@
 <title>Cabine — PC</title>
 <style>
   body{font-family:Arial, sans-serif;background:#111;color:#fff;margin:16px;}
-  #photosPreview img{max-width:300px;border:3px solid #fff;margin:6px;border-radius:8px;}
-  button{padding:10px 14px;margin-right:8px;border-radius:8px;border:none;background:#0b84ff;color:#fff;font-weight:700}
+  #photosPreview{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  #photosPreview img{max-width:300px;border:3px solid #fff;border-radius:8px;}
+  button{padding:10px 14px;margin-right:8px;border-radius:8px;border:none;background:#0b84ff;color:#fff;font-weight:700;cursor:pointer;}
+  button:disabled{background:#666;cursor:not-allowed;}
   #qrDiv a{color:#0bf;}
+  #debug{background:#222;padding:10px;border-radius:5px;margin-top:10px;font-family:monospace;font-size:12px;}
 </style>
 </head>
 <body>
 <h1>PC — Operador</h1>
 <div id="status">Status: <span id="conn">Conectando...</span></div>
 <div id="controls" style="margin-top:12px"></div>
-<div id="photosPreview" style="margin-top:12px"></div>
+<div id="photosPreview"></div>
 <div id="qrDiv" style="margin-top:12px"></div>
+<div id="debug"></div>
+
 <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <script>
@@ -28,11 +33,19 @@
   const controls = document.getElementById('controls');
   const preview = document.getElementById('photosPreview');
   const qrDiv = document.getElementById('qrDiv');
+  const debug = document.getElementById('debug');
+  
   let latestPhotos = [];
   
   // Usar session da URL ou criar uma padrão
   const urlParams = new URLSearchParams(window.location.search);
   let sessionId = urlParams.get('session') || 'pc_' + Date.now();
+  
+  function logDebug(message) {
+    const timestamp = new Date().toLocaleTimeString();
+    debug.innerHTML = `[${timestamp}] ${message}<br>` + debug.innerHTML;
+    console.log('DEBUG:', message);
+  }
   
   function ensureButton(id, text){
     let b = document.getElementById(id);
@@ -48,23 +61,29 @@
   // Entrar na sala ao conectar
   socket.on('connect', ()=>{ 
     conn.textContent = 'Conectado'; 
-    console.log('PC connected');
+    logDebug('PC connected to server');
     socket.emit('join_room', { session: sessionId });
-    console.log('PC joined room:', sessionId);
+    logDebug(`PC joined room: ${sessionId}`);
   });
   
-  socket.on('disconnect', ()=>{ conn.textContent = 'Offline'; });
+  socket.on('disconnect', ()=>{ 
+    conn.textContent = 'Offline'; 
+    logDebug('PC disconnected');
+  });
   
   socket.on('photos_from_cell', (data)=>{ 
-    console.log('Photos from cell', data); 
+    logDebug(`📸 Received photos_from_cell: ${data?.photos?.length} photos, session: ${data?.session}`);
+    
     if(data && data.photos){ 
       latestPhotos = data.photos; 
       preview.innerHTML = ''; 
       latestPhotos.forEach((p,i)=>{ 
         const img = document.createElement('img'); 
         img.src = p; 
+        img.title = `Foto ${i+1}`;
         preview.appendChild(img); 
       }); 
+      logDebug(`✅ ${latestPhotos.length} photos displayed`);
     } 
   });
   
@@ -73,13 +92,19 @@
     preview.innerHTML = ''; 
     qrDiv.innerHTML = ''; 
     socket.emit('finalize_session', { session: sessionId }); 
+    logDebug('🔄 Session finalized');
   });
   
   btnGenQR.addEventListener('click', ()=>{ 
     const url = window.location.origin + '/celular.html?session=' + sessionId; 
-    qrDiv.innerHTML = ''; 
+    qrDiv.innerHTML = '<h3>QR Code para Celular:</h3>'; 
     QRCode.toCanvas(url, { width: 200 }, (err, canvas)=>{ 
-      if(!err) qrDiv.appendChild(canvas); 
+      if(!err) {
+        qrDiv.appendChild(canvas); 
+        logDebug('✅ QR Code generated');
+      } else {
+        logDebug('❌ QR Code error: ' + err);
+      }
     }); 
     const p = document.createElement('p'); 
     p.innerHTML = '<a href="'+url+'" target="_blank">'+url+'</a>'; 
@@ -160,12 +185,16 @@
     if(latestPhotos.length<1) return alert('Nenhuma foto recebida'); 
     btnGenSend.disabled = true; 
     btnGenSend.textContent = 'Gerando...'; 
+    
+    logDebug('🔄 Starting montage generation and upload...');
+    
     const insta = await createInstagramMontage(); 
     const printm = await createPrintMontage(); 
     const uploads = latestPhotos.map(p=>uploadToImgbb(p)); 
     uploads.push(uploadToImgbb(insta)); 
     uploads.push(uploadToImgbb(printm)); 
     const results = await Promise.all(uploads); 
+    
     qrDiv.innerHTML = ''; 
     const instaUrl = results[latestPhotos.length] || results[0]; 
     QRCode.toCanvas(instaUrl, { width:200 }, (err, canvas)=>{ 
@@ -174,8 +203,10 @@
     const list = document.createElement('div'); 
     list.innerHTML = '<h4>Links</h4>' + results.map(u=> u? '<a href="'+u+'" target="_blank">'+u+'</a>' : 'erro').join('<br>'); 
     qrDiv.appendChild(list); 
+    
     btnGenSend.disabled = false; 
     btnGenSend.textContent = 'Gerar Visualizador + Enviar'; 
+    logDebug('✅ Montage generation completed');
   });
   
   btnPrint.addEventListener('click', async ()=>{ 
@@ -184,7 +215,11 @@
     w.document.write('<html><head><style>@page{size:9cm 13cm;margin:0;}body{margin:0;}img{width:100%;height:auto;display:block;}</style></head><body><img src="'+dataUrl+'"></body></html>'); 
     w.document.close(); 
     setTimeout(()=>{ w.focus(); w.print(); }, 600); 
+    logDebug('🖨️ Print dialog opened');
   });
+  
+  // Inicialização
+  logDebug(`PC initialized with session: ${sessionId}`);
 })();
 </script>
 </body>
