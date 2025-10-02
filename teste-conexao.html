@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Teste de Conexão</title>
+</head>
+<body>
+    <h1>Teste de Conexão Socket.IO</h1>
+    <button onclick="testarConexao()">Testar Conexão</button>
+    <div id="resultado"></div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        async function testarConexao() {
+            const resultado = document.getElementById('resultado');
+            resultado.innerHTML = 'Testando...<br>';
+            
+            // Teste 1: Health Check
+            try {
+                const response = await fetch('https://render-9ea7.onrender.com/health');
+                const data = await response.json();
+                resultado.innerHTML += `✅ Health Check: ${data.message}<br>`;
+            } catch (error) {
+                resultado.innerHTML += `❌ Health Check FALHOU: ${error}<br>`;
+            }
+            
+            // Teste 2: Debug Endpoint
+            try {
+                const response = await fetch('https://render-9ea7.onrender.com/debug');
+                const data = await response.json();
+                resultado.innerHTML += `✅ Debug: ${data.totalSockets} conexões<br>`;
+            } catch (error) {
+                resultado.innerHTML += `❌ Debug FALHOU: ${error}<br>`;
+            }
+            
+            // Teste 3: Socket.IO Connection
+            try {
+                resultado.innerHTML += 'Tentando conectar Socket.IO...<br>';
+                const socket = io("https://render-9ea7.onrender.com", {
+                    transports: ['websocket', 'polling'],
+                    timeout: 5000
+                });
+                
+                socket.on('connect', () => {
+                    resultado.innerHTML += '✅ SOCKET.IO CONECTADO!<br>';
+                    socket.disconnect();
+                });
+                
+                socket.on('connect_error', (error) => {
+                    resultado.innerHTML += `❌ Socket.IO FALHOU: ${error}<br>`;
+                });
+                
+                setTimeout(() => {
+                    if (!socket.connected) {
+                        resultado.innerHTML += '❌ Socket.IO TIMEOUT<br>';
+                    }
+                }, 6000);
+                
+            } catch (error) {
+                resultado.innerHTML += `❌ Socket.IO ERRO: ${error}<br>`;
+            }
+        }
+        
+        // Testar automaticamente
+        testarConexao();
+    </script>
+</body>
+</html>
